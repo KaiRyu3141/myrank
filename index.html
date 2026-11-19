@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>マイ動画ランキング</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--line:#e3e6ea;--text:#1a1c1f;--sub:#6b7280;--accent:#1d6fd8;--accent-bg:#e8f1fc}
+@media (prefers-color-scheme:dark){:root{--bg:#121417;--card:#1c1f23;--line:#2e333a;--text:#e9ebee;--sub:#9aa1ab;--accent:#5aa2f5;--accent-bg:#1a2a3d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif;-webkit-user-select:none;user-select:none}
+main{max-width:600px;margin:0 auto;padding:16px 12px 80px}
+h1{font-size:20px;margin:4px 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);font-size:16px}
+.row{display:flex;gap:8px;margin-top:8px}
+.row>*{flex:1;min-width:0}
+button{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);font-size:14px;cursor:pointer}
+button.main{background:var(--accent);border-color:var(--accent);color:#fff}
+.err{color:#d33;font-size:13px;margin-top:6px;min-height:1em}
+.head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.rank{flex:none;width:34px;height:34px;border-radius:50%;background:var(--accent-bg);color:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:600}
+.meta{flex:1;min-width:0;font-size:13px;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tools{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.tools button{padding:6px 10px;font-size:13px}
+.embed{min-height:120px;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:13px}
+.embed iframe{max-width:100%!important}
+.empty{text-align:center;color:var(--sub);padding:30px 0}
+details summary{cursor:pointer;color:var(--sub);font-size:14px}
+textarea{width:100%;min-height:90px;margin-top:8px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);padding:8px;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+  <h1>マイ動画ランキング</h1>
+
+  <div class="card">
+    <input id="url" type="url" placeholder="https://x.com/ユーザー名/status/123…">
+    <div class="row">
+      <input id="likes" type="number" min="0" inputmode="numeric" placeholder="いいね数（任意）">
+      <input id="memo" type="text" placeholder="メモ（任意）">
+    </div>
+    <div class="row"><button class="main" id="add">追加</button></div>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <select id="sort">
+        <option value="likes">いいね数の順</option>
+        <option value="manual">手動の並び順</option>
+        <option value="new">追加が新しい順</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="list"></div>
+
+  <div class="card">
+    <details>
+      <summary>バックアップ・復元</summary>
+      <textarea id="backup" placeholder="ここに書き出し／貼り付け"></textarea>
+      <div class="row">
+        <button id="exp">書き出し</button>
+        <button id="imp">復元</button>
+      </div>
+    </details>
+  </div>
+</main>
+
+<script>
+const KEY = "myVideoRanking.v1";
+let items = load();
+
+function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || []; }catch(e){ return []; } }
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(items)); }catch(e){} }
+
+function tweetId(u){
+  const m = String(u).trim().match(/^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/[^\/]+\/status(?:es)?\/(\d+)/i);
+  return m ? m[1] : null;
+}
+
+const $ = id => document.getElementById(id);
+
+$("add").onclick = () => {
+  const id = tweetId($("url").value);
+  if(!id){ $("err").textContent = "x.com か twitter.com の投稿URLを入れてください"; return; }
+  if(items.some(i => i.id === id)){ $("err").textContent = "もう追加されています"; return; }
+  items.push({ id, likes: Number($("likes").value) || 0, memo: $("memo").value.trim(), added: Date.now(), order: items.length });
+  save();
+  $("url").value = $("likes").value = $("memo").value = "";
+  $("err").textContent = "";
+  render();
+};
+$("url").oninput = () => $("err").textContent = "";
+$("sort").onchange = render;
+
+function sorted(){
+  const s = $("sort").value, a = [...items];
+  if(s === "likes") a.sort((x,y) => y.likes - x.likes);
+  if(s === "manual") a.sort((x,y) => x.order - y.order);
+  if(s === "new") a.sort((x,y) => y.added - x.added);
+  return a;
+}
+
+function move(id, dir){
+  const a = [...items].sort((x,y) => x.order - y.order);
+  const i = a.findIndex(x => x.id === id), j = i + dir;
+  if(j < 0 || j >= a.length) return;
+  [a[i].order, a[j].order] = [a[j].order, a[i].order];
+  save(); render();
+}
+
+function render(){
+  const list = $("list");
+  list.innerHTML = "";
+  const a = sorted();
+  if(!a.length){ list.innerHTML = '<div class="card empty">まだ何もありません。上から投稿URLを追加してください。</div>'; return; }
+  const manual = $("sort").value === "manual";
+  a.forEach((it, idx) => {
+    const c = document.createElement("div");
+    c.className = "card";
+    c.innerHTML = `
+      <div class="head">
+        <div class="rank">${idx+1}</div>
+        <div class="meta">${it.likes ? it.likes.toLocaleString()+" いいね" : "いいね未入力"}${it.memo ? "・"+escapeHtml(it.memo) : ""}</div>
+      </div>
+      <div class="embed" data-id="${it.id}">読み込み待ち…</div>
+      <div class="tools">
+        ${manual ? '<button data-a="up">上へ</button><button data-a="down">下へ</button>' : ""}
+        <button data-a="likes">いいね数を変更</button>
+        <button data-a="del">削除</button>
+      </div>`;
+    c.querySelector(".tools").onclick = e => {
+      const act = e.target.dataset.a; if(!act) return;
+      if(act === "up") move(it.id, -1);
+      if(act === "down") move(it.id, 1);
+      if(act === "likes"){
+        const v = prompt("いいね数", it.likes);
+        if(v !== null && !isNaN(Number(v))){ it.likes = Number(v); save(); render(); }
+      }
+      if(act === "del" && confirm("削除しますか？")){ items = items.filter(x => x.id !== it.id); save(); render(); }
+    };
+    list.appendChild(c);
+  });
+  observe();
+}
+
+function escapeHtml(s){ return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+let io;
+function observe(){
+  if(io) io.disconnect();
+  io = new IntersectionObserver(es => es.forEach(e => {
+    if(!e.isIntersecting) return;
+    io.unobserve(e.target);
+    embed(e.target);
+  }), { rootMargin: "400px" });
+  document.querySelectorAll(".embed").forEach(el => io.observe(el));
+}
+
+function embed(el){
+  const go = () => {
+    el.textContent = "";
+    window.twttr.widgets.createTweet(el.dataset.id, el, {
+      theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light",
+      conversation: "none", dnt: true, align: "center"
+    }).then(node => {
+      if(!node) el.innerHTML = '投稿が削除されたか非公開です。<br><a href="https://x.com/i/status/'+el.dataset.id+'" target="_blank" rel="noopener">Xで確認</a>';
+    });
+  };
+  window.twttr && window.twttr.widgets ? go() : (window._q = window._q || []).push(go);
+}
+
+$("exp").onclick = () => { $("backup").value = JSON.stringify(items); };
+$("imp").onclick = () => {
+  try{
+    const d = JSON.parse($("backup").value);
+    if(!Array.isArray(d)) throw 0;
+    items = d.filter(x => x && /^\d+$/.test(x.id));
+    save(); render();
+  }catch(e){ alert("形式が正しくありません"); }
+};
+
+document.addEventListener("contextmenu", e => e.preventDefault());
+render();
+</script>
+<script async src="https://platform.twitter.com/widgets.js" charset="utf-8"
+  onload="twttr.ready(()=>{(window._q||[]).forEach(f=>f());window._q=[]})"></script>
+</body>
+</html>
